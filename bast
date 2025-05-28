@@ -46,38 +46,53 @@ public class AsyncBarycentricMeshGenerator : EditorWindow
 
         List<Vector3> newVerts = new List<Vector3>(triangles.Length);
         List<Color> newColors = new List<Color>(triangles.Length);
-        List<Vector2> newUVs = new List<Vector2>(triangles.Length);
-        List<Vector3> newNormals = new List<Vector3>(triangles.Length);
+        List<Vector2> newUVs = uvs != null ? new List<Vector2>(triangles.Length) : null;
+        List<Vector3> newNormals = normals != null ? new List<Vector3>(triangles.Length) : null;
         List<int> newIndices = new List<int>(triangles.Length);
 
-        float total = triangles.Length / 3f;
+        float totalTris = triangles.Length / 3f;
 
         for (int i = 0; i < triangles.Length; i += 3)
         {
-            int triIndex = i / 3;
+            int t0 = triangles[i];
+            int t1 = triangles[i + 1];
+            int t2 = triangles[i + 2];
 
-            for (int j = 0; j < 3; j++)
+            Vector3 v0 = vertices[t0];
+            Vector3 v1 = vertices[t1];
+            Vector3 v2 = vertices[t2];
+
+            newVerts.Add(v0);
+            newVerts.Add(v1);
+            newVerts.Add(v2);
+
+            newColors.Add(Color.red);
+            newColors.Add(Color.green);
+            newColors.Add(Color.blue);
+
+            if (uvs != null)
             {
-                int vertexIndex = triangles[i + j];
-                newVerts.Add(vertices[vertexIndex]);
-
-                if (uvs != null)
-                    newUVs.Add(uvs[vertexIndex]);
-                if (normals != null)
-                    newNormals.Add(normals[vertexIndex]);
-
-                // Barycentric: red, green, blue per triangle vertex
-                newColors.Add(j == 0 ? Color.red :
-                              j == 1 ? Color.green :
-                                       Color.blue);
-
-                newIndices.Add(newVerts.Count - 1);
+                newUVs.Add(uvs[t0]);
+                newUVs.Add(uvs[t1]);
+                newUVs.Add(uvs[t2]);
             }
+
+            if (normals != null)
+            {
+                newNormals.Add(normals[t0]);
+                newNormals.Add(normals[t1]);
+                newNormals.Add(normals[t2]);
+            }
+
+            int baseIndex = newVerts.Count - 3;
+            newIndices.Add(baseIndex);
+            newIndices.Add(baseIndex + 1);
+            newIndices.Add(baseIndex + 2);
 
             if (i % (stepSize * 3) == 0)
             {
                 float progress = i / (float)triangles.Length;
-                EditorUtility.DisplayProgressBar("Generating Barycentric Mesh", $"Triangle {triIndex} / {(int)total}", progress);
+                EditorUtility.DisplayProgressBar("Generating Barycentric Mesh", $"Triangle {(i / 3)} of {(int)totalTris}", progress);
                 yield return null;
             }
         }
