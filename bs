@@ -1,0 +1,51 @@
+using UnityEngine;
+
+[RequireComponent(typeof(MeshFilter))]
+public class BarycentricMeshInjector : MonoBehaviour
+{
+    void Start()
+    {
+        MeshFilter meshFilter = GetComponent<MeshFilter>();
+        Mesh originalMesh = meshFilter.sharedMesh;
+
+        if (originalMesh == null)
+        {
+            Debug.LogError("No mesh found on this GameObject.");
+            return;
+        }
+
+        // Extract original mesh data
+        Vector3[] originalVertices = originalMesh.vertices;
+        int[] originalTriangles = originalMesh.triangles;
+
+        // Prepare new mesh data
+        Vector3[] newVertices = new Vector3[originalTriangles.Length];
+        int[] newTriangles = new int[originalTriangles.Length];
+        Color[] newColors = new Color[originalTriangles.Length];
+
+        for (int i = 0; i < originalTriangles.Length; i += 3)
+        {
+            // Duplicate each triangle's vertices
+            for (int j = 0; j < 3; j++)
+            {
+                int index = i + j;
+
+                newVertices[index] = originalVertices[originalTriangles[index]];
+                newTriangles[index] = index;
+
+                // Assign RGB per triangle
+                newColors[index] = j == 0 ? Color.red : (j == 1 ? Color.green : Color.blue);
+            }
+        }
+
+        // Create the new mesh
+        Mesh baryMesh = new Mesh();
+        baryMesh.vertices = newVertices;
+        baryMesh.triangles = newTriangles;
+        baryMesh.colors = newColors;
+        baryMesh.RecalculateNormals();
+        baryMesh.RecalculateBounds();
+
+        meshFilter.mesh = baryMesh;
+    }
+}
