@@ -1,0 +1,78 @@
+using UnityEngine;
+using UnityEditor;
+using System.IO;
+
+public class BarycentricMeshGenerator : EditorWindow
+{
+    private Mesh sourceMesh;
+    private string newAssetName = "BarycentricMesh";
+
+    [MenuItem("Tools/Generate Barycentric Mesh")]
+    public static void ShowWindow()
+    {
+        GetWindow<BarycentricMeshGenerator>("Barycentric Mesh Generator");
+    }
+
+    void OnGUI()
+    {
+        GUILayout.Label("Convert Mesh to Barycentric Format", EditorStyles.boldLabel);
+
+        sourceMesh = (Mesh)EditorGUILayout.ObjectField("Source Mesh", sourceMesh, typeof(Mesh), false);
+        newAssetName = EditorGUILayout.TextField("New Mesh Name", newAssetName);
+
+        if (GUILayout.Button("Generate and Save"))
+        {
+            if (sourceMesh == null)
+            {
+                EditorUtility.DisplayDialog("Error", "Please assign a source mesh.", "OK");
+                return;
+            }
+
+            CreateBarycentricMesh(sourceMesh, newAssetName);
+        }
+    }
+
+    void CreateBarycentricMesh(Mesh originalMesh, string assetName)
+    {
+        Vector3[] oldVerts = originalMesh.vertices;
+        int[] oldTris = originalMesh.triangles;
+
+        Vector3[] newVerts = new Vector3[oldTris.Length];
+        int[] newTris = new int[oldTris.Length];
+        Color[] newColors = new Color[oldTris.Length];
+
+        for (int i = 0; i < oldTris.Length; i += 3)
+        {
+            for (int j = 0; j < 3; j++)
+            {
+                int newIndex = i + j;
+                int oldIndex = oldTris[newIndex];
+
+                newVerts[newIndex] = oldVerts[oldIndex];
+                newTris[newIndex] = newIndex;
+
+                // Assign barycentric coordinates as vertex colors
+                if (j == 0) newColors[newIndex] = new Color(1, 0, 0);
+                else if (j == 1) newColors[newIndex] = new Color(0, 1, 0);
+                else newColors[newIndex] = new Color(0, 0, 1);
+            }
+        }
+
+        Mesh baryMesh = new Mesh();
+        baryMesh.name = assetName;
+        baryMesh.vertices = newVerts;
+        baryMesh.triangles = newTris;
+        baryMesh.colors = newColors;
+        baryMesh.RecalculateNormals();
+        baryMesh.RecalculateBounds();
+
+        // Save as asset
+        string path = EditorUtility.SaveFilePanelInProject("Save Barycentric Mesh", assetName, "asset", "Choose save location");
+        if (!string.IsNullOrEmpty(path))
+        {
+            AssetDatabase.CreateAsset(baryMesh, path);
+            AssetDatabase.SaveAssets();
+            EditorUtility.DisplayDialog("Success", "Barycentric mesh saved to:\n" + path, "OK");
+        }
+    }
+}
