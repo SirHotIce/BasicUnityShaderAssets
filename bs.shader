@@ -1,15 +1,18 @@
-Shader "URP/Unlit/BarycentricWireframe"
+Shader "URP/Unlit/BarycentricWireAlpha"
 {
     Properties
     {
         _LineColor ("Line Color", Color) = (0, 0, 0, 1)
-        _FillColor ("Fill Color", Color) = (1, 1, 1, 1)
-        _LineWidth ("Line Width", Range(0.001, 0.1)) = 0.02
+        _LineWidth ("Line Width", Range(0.0001, 0.1)) = 0.02
     }
 
     SubShader
     {
-        Tags { "RenderType" = "Opaque" }
+        Tags { "RenderType" = "Transparent" "Queue" = "Transparent" }
+        Blend SrcAlpha OneMinusSrcAlpha
+        ZWrite Off
+        Cull Off // Render both sides
+
         Pass
         {
             Name "ForwardLit"
@@ -34,7 +37,6 @@ Shader "URP/Unlit/BarycentricWireframe"
 
             float _LineWidth;
             float4 _LineColor;
-            float4 _FillColor;
 
             Varyings vert(Attributes input)
             {
@@ -47,8 +49,11 @@ Shader "URP/Unlit/BarycentricWireframe"
             half4 frag(Varyings input) : SV_Target
             {
                 float minBary = min(input.bary.x, min(input.bary.y, input.bary.z));
+                
                 float edge = smoothstep(0.0, _LineWidth, minBary);
-                return lerp(_LineColor, _FillColor, edge);
+
+                // Return line color with alpha depending on edge distance
+                return float4(_LineColor.rgb, 1.0 - edge); // fully opaque at edge, fades to transparent
             }
             ENDHLSL
         }
