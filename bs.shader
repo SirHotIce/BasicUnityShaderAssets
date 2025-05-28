@@ -1,4 +1,4 @@
-Shader "Unlit/BarycentricWireframe"
+Shader "URP/Unlit/BarycentricWireframe"
 {
     Properties
     {
@@ -10,23 +10,25 @@ Shader "Unlit/BarycentricWireframe"
     SubShader
     {
         Tags { "RenderType" = "Opaque" }
-        LOD 100
-
         Pass
         {
-            CGPROGRAM
+            Name "ForwardLit"
+            Tags { "LightMode" = "UniversalForward" }
+
+            HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
-            struct appdata
+            struct Attributes
             {
-                float4 vertex : POSITION;
-                float4 color : COLOR; // Barycentric stored in vertex color
+                float4 positionOS : POSITION;
+                float3 color : COLOR; // RGB = barycentric coords
             };
 
-            struct v2f
+            struct Varyings
             {
-                float4 pos : SV_POSITION;
+                float4 positionHCS : SV_POSITION;
                 float3 bary : COLOR;
             };
 
@@ -34,21 +36,22 @@ Shader "Unlit/BarycentricWireframe"
             float4 _LineColor;
             float4 _FillColor;
 
-            v2f vert(appdata v)
+            Varyings vert(Attributes input)
             {
-                v2f o;
-                o.pos = UnityObjectToClipPos(v.vertex);
-                o.bary = v.color.rgb;
-                return o;
+                Varyings output;
+                output.positionHCS = TransformObjectToHClip(input.positionOS);
+                output.bary = input.color.rgb;
+                return output;
             }
 
-            fixed4 frag(v2f i) : SV_Target
+            half4 frag(Varyings input) : SV_Target
             {
-                float minBary = min(i.bary.x, min(i.bary.y, i.bary.z));
+                float minBary = min(input.bary.x, min(input.bary.y, input.bary.z));
                 float edge = smoothstep(0.0, _LineWidth, minBary);
                 return lerp(_LineColor, _FillColor, edge);
             }
-            ENDCG
+            ENDHLSL
         }
     }
+    FallBack "Hidden/InternalErrorShader"
 }
