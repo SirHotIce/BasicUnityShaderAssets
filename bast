@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEditor;
-using System.Collections;
 using System.Collections.Generic;
+using Unity.EditorCoroutines.Editor;
 
 public class AsyncBarycentricMeshGenerator : EditorWindow
 {
@@ -9,8 +9,7 @@ public class AsyncBarycentricMeshGenerator : EditorWindow
     private string newMeshName = "BarycentricMesh";
     private bool preserveUVs = true;
     private bool preserveNormals = true;
-
-    private int stepSize = 1000; // how many triangles to process per frame
+    private int stepSize = 1000;
 
     [MenuItem("Tools/Async Barycentric Mesh Generator")]
     public static void ShowWindow()
@@ -38,70 +37,71 @@ public class AsyncBarycentricMeshGenerator : EditorWindow
         }
     }
 
-    IEnumerator GenerateAsync()
+    System.Collections.IEnumerator GenerateAsync()
     {
         int[] triangles = sourceMesh.triangles;
-        Vector3[] verts = sourceMesh.vertices;
-        Vector2[] uvs = preserveUVs && sourceMesh.uv.Length == verts.Length ? sourceMesh.uv : null;
-        Vector3[] normals = preserveNormals && sourceMesh.normals.Length == verts.Length ? sourceMesh.normals : null;
+        Vector3[] vertices = sourceMesh.vertices;
+        Vector2[] uvs = preserveUVs && sourceMesh.uv.Length == vertices.Length ? sourceMesh.uv : null;
+        Vector3[] normals = preserveNormals && sourceMesh.normals.Length == vertices.Length ? sourceMesh.normals : null;
 
         List<Vector3> newVerts = new List<Vector3>(triangles.Length);
+        List<Color> newColors = new List<Color>(triangles.Length);
         List<Vector2> newUVs = new List<Vector2>(triangles.Length);
         List<Vector3> newNormals = new List<Vector3>(triangles.Length);
-        List<Color> newColors = new List<Color>(triangles.Length);
         List<int> newIndices = new List<int>(triangles.Length);
 
         float total = triangles.Length / 3f;
 
         for (int i = 0; i < triangles.Length; i += 3)
         {
+            int triIndex = i / 3;
+
             for (int j = 0; j < 3; j++)
             {
-                int oldIndex = triangles[i + j];
-
-                newVerts.Add(verts[oldIndex]);
+                int vertexIndex = triangles[i + j];
+                newVerts.Add(vertices[vertexIndex]);
 
                 if (uvs != null)
-                    newUVs.Add(uvs[oldIndex]);
-
+                    newUVs.Add(uvs[vertexIndex]);
                 if (normals != null)
-                    newNormals.Add(normals[oldIndex]);
+                    newNormals.Add(normals[vertexIndex]);
 
+                // Barycentric: red, green, blue per triangle vertex
                 newColors.Add(j == 0 ? Color.red :
                               j == 1 ? Color.green :
                                        Color.blue);
 
-                newIndices.Add(i + j);
+                newIndices.Add(newVerts.Count - 1);
             }
 
             if (i % (stepSize * 3) == 0)
             {
-                float progress = i / (triangles.Length * 1f);
-                EditorUtility.DisplayProgressBar("Generating Barycentric Mesh", $"Processing triangle {i / 3} of {triangles.Length / 3}", progress);
+                float progress = i / (float)triangles.Length;
+                EditorUtility.DisplayProgressBar("Generating Barycentric Mesh", $"Triangle {triIndex} / {(int)total}", progress);
                 yield return null;
             }
         }
 
         EditorUtility.ClearProgressBar();
 
-        Mesh result = new Mesh();
-        result.name = newMeshName;
-        result.SetVertices(newVerts);
-        result.SetColors(newColors);
-        result.SetTriangles(newIndices, 0);
+        Mesh baryMesh = new Mesh();
+        baryMesh.name = newMeshName;
+        baryMesh.SetVertices(newVerts);
+        baryMesh.SetColors(newColors);
+        baryMesh.SetTriangles(newIndices, 0);
 
-        if (uvs != null) result.SetUVs(0, newUVs);
-        if (normals != null) result.SetNormals(newNormals);
+        if (uvs != null) baryMesh.SetUVs(0, newUVs);
+        if (normals != null) baryMesh.SetNormals(newNormals);
 
-        result.RecalculateBounds();
-        result.RecalculateTangents();
+        baryMesh.RecalculateBounds();
+        baryMesh.RecalculateTangents();
 
-        string savePath = EditorUtility.SaveFilePanelInProject("Save Mesh Asset", newMeshName, "asset", "Choose location to save the barycentric mesh");
+        string savePath = EditorUtility.SaveFilePanelInProject("Save Barycentric Mesh", newMeshName, "asset", "Choose save location");
         if (!string.IsNullOrEmpty(savePath))
         {
-            AssetDatabase.CreateAsset(result, savePath);
+            AssetDatabase.CreateAsset(baryMesh, savePath);
             AssetDatabase.SaveAssets();
-            EditorUtility.DisplayDialog("Success", "Mesh saved to:\n" + savePath, "OK");
+            EditorUtility.DisplayDialog("Success", "Mesh saved successfully!", "OK");
         }
     }
 }
