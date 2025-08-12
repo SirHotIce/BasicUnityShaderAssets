@@ -1,143 +1,171 @@
+# Adding a Second Color Attachment in hello_xr (Vulkan Path)
 
-Render Pass Configuration
+This document describes the modifications required to integrate a second color attachment in the Vulkan rendering path of `hello_xr`. It assumes that the OpenXR side already provides the secondary swapchain or image.
 
-The render pass must describe both the primary OpenXR swapchain color attachment and the additional color attachment, along with the existing depth attachment.
+---
 
-VkAttachmentDescription attachments[3] = {};
+## Render Pass Changes
 
-// Primary color (OpenXR swapchain)
-attachments[0].format = primaryColorFormat;
-attachments[0].samples = sampleCount;
-attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+Locate the render pass creation (in `graphicsplugin_vulkan.cpp`) and expand it to include a second color attachment.
 
-// Secondary color
-attachments[1].format = secondaryColorFormat;
-attachments[1].samples = sampleCount;
-attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-attachments[1].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+```cpp
+// Attachments: [0]=primary XR color, [1]=secondary color, [2]=depth
+VkAttachmentDescription atts[3] = {};
 
-// Depth
-attachments[2].format = depthFormat;
-attachments[2].samples = sampleCount;
-attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-attachments[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-attachments[2].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+// primary color (XR swapchain format)
+atts[0].format        = primaryColorFormat;
+atts[0].samples       = sampleCount;
+atts[0].loadOp        = VK_ATTACHMENT_LOAD_OP_CLEAR;
+atts[0].storeOp       = VK_ATTACHMENT_STORE_OP_STORE;
+atts[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+atts[0].finalLayout   = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+// secondary color
+atts[1].format        = secondaryColorFormat;
+atts[1].samples       = sampleCount;
+atts[1].loadOp        = VK_ATTACHMENT_LOAD_OP_CLEAR;
+atts[1].storeOp       = VK_ATTACHMENT_STORE_OP_STORE;
+atts[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+atts[1].finalLayout   = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+// depth
+atts[2].format        = depthFormat;
+atts[2].samples       = sampleCount;
+atts[2].loadOp        = VK_ATTACHMENT_LOAD_OP_CLEAR;
+atts[2].storeOp       = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+atts[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+atts[2].stencilStoreOp= VK_ATTACHMENT_STORE_OP_DONT_CARE;
+atts[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+atts[2].finalLayout   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 VkAttachmentReference colorRefs[2] = {
     {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
     {1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}
 };
-
 VkAttachmentReference depthRef{2, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
 
 VkSubpassDescription subpass{};
-subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-subpass.colorAttachmentCount = 2;
-subpass.pColorAttachments = colorRefs;
+subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+subpass.colorAttachmentCount    = 2;
+subpass.pColorAttachments       = colorRefs;
 subpass.pDepthStencilAttachment = &depthRef;
 
-VkRenderPassCreateInfo renderPassInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-renderPassInfo.attachmentCount = 3;
-renderPassInfo.pAttachments = attachments;
-renderPassInfo.subpassCount = 1;
-renderPassInfo.pSubpasses = &subpass;
+VkRenderPassCreateInfo rpci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+rpci.attachmentCount = 3;
+rpci.pAttachments    = atts;
+rpci.subpassCount    = 1;
+rpci.pSubpasses      = &subpass;
 
-vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass);
+VK_CHECK(vkCreateRenderPass(device, &rpci, nullptr, &renderPass));
+```
 
+---
 
-⸻
+## Pipeline Color Blend State
 
-Pipeline Color Blend State
+In `CreateGraphicsPipeline(...)`, set the blend state for two color attachments.
 
-The graphics pipeline must include a blend state entry for each color attachment in the subpass.
-
-VkPipelineColorBlendAttachmentState blendStates[2]{};
-
+```cpp
+VkPipelineColorBlendAttachmentState blends[2]{};
 for (uint32_t i = 0; i < 2; ++i) {
-    blendStates[i].blendEnable = VK_FALSE;
-    blendStates[i].colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT |
-        VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT |
-        VK_COLOR_COMPONENT_A_BIT;
+    blends[i].blendEnable = VK_FALSE;
+    blends[i].colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 }
 
-VkPipelineColorBlendStateCreateInfo blendInfo{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-blendInfo.attachmentCount = 2;
-blendInfo.pAttachments = blendStates;
+VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+cb.attachmentCount = 2;
+cb.pAttachments    = blends;
+```
 
-The VkGraphicsPipelineCreateInfo must reference this blendInfo and be compatible with the updated render pass.
+Update the fragment shader to output to both attachments:
 
-⸻
+```glsl
+layout(location = 0) out vec4 outColor0;
+layout(location = 1) out vec4 outColor1;
+```
 
-Framebuffer Creation
+---
 
-Each framebuffer must contain image views for the primary color attachment, the secondary color attachment, and the depth attachment.
+## Swapchain Image Views
 
-std::array<VkImageView, 3> framebufferAttachments = {
+If using a second XR swapchain, enumerate its images and create `VkImageView`s similar to the primary.  
+If using offscreen images, create them with `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT` (and `SAMPLED_BIT` if needed).
+
+---
+
+## Framebuffer Creation
+
+When creating framebuffers, attach the primary color, secondary color, and depth image views.
+
+```cpp
+std::array<VkImageView, 3> fbViews = {
     primaryColorView,
     secondaryColorView,
     depthView
 };
 
-VkFramebufferCreateInfo framebufferInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-framebufferInfo.renderPass = renderPass;
-framebufferInfo.attachmentCount = static_cast<uint32_t>(framebufferAttachments.size());
-framebufferInfo.pAttachments = framebufferAttachments.data();
-framebufferInfo.width = renderWidth;
-framebufferInfo.height = renderHeight;
-framebufferInfo.layers = layerCount;
+VkFramebufferCreateInfo fbi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+fbi.renderPass      = renderPass;
+fbi.attachmentCount = static_cast<uint32_t>(fbViews.size());
+fbi.pAttachments    = fbViews.data();
+fbi.width           = renderWidth;
+fbi.height          = renderHeight;
+fbi.layers          = layerCount;
 
-vkCreateFramebuffer(device, &framebufferInfo, nullptr, &framebuffer);
+VK_CHECK(vkCreateFramebuffer(device, &fbi, nullptr, &framebuffer));
+```
 
+---
 
-⸻
+## Command Buffer Recording
 
-Command Buffer Recording
+Extend the clear values array and begin the render pass.
 
-The render pass must be begun with clear values for both color attachments and the depth attachment.
+```cpp
+VkClearValue clears[3];
+clears[0].color        = {{0.f, 0.f, 0.f, 1.f}};
+clears[1].color        = {{0.f, 0.f, 0.f, 1.f}};
+clears[2].depthStencil = {1.f, 0};
 
-VkClearValue clearValues[3];
-clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; // Primary color
-clearValues[1].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; // Secondary color
-clearValues[2].depthStencil = {1.0f, 0};
+VkRenderPassBeginInfo rpb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+rpb.renderPass      = renderPass;
+rpb.framebuffer     = framebufferForThisViewAndIndex;
+rpb.renderArea      = {{0, 0}, {renderWidth, renderHeight}};
+rpb.clearValueCount = 3;
+rpb.pClearValues    = clears;
 
-VkRenderPassBeginInfo beginInfo{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-beginInfo.renderPass = renderPass;
-beginInfo.framebuffer = framebuffer;
-beginInfo.renderArea.offset = {0, 0};
-beginInfo.renderArea.extent = {renderWidth, renderHeight};
-beginInfo.clearValueCount = 3;
-beginInfo.pClearValues = clearValues;
+vkCmdBeginRenderPass(cmd, &rpb, VK_SUBPASS_CONTENTS_INLINE);
+// draw calls
+vkCmdEndRenderPass(cmd);
+```
 
-vkCmdBeginRenderPass(commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+---
 
-// Bind pipeline and issue draw calls here.
+## Acquire/Release for Secondary XR Swapchain
 
-vkCmdEndRenderPass(commandBuffer);
+If the secondary attachment is an XR swapchain:
 
+```cpp
+XrSwapchainImageAcquireInfo acq{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+uint32_t idx1 = 0; 
+xrAcquireSwapchainImage(secondarySwapchain, &acq, &idx1);
 
-⸻
+XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+waitInfo.timeout = XR_INFINITE_DURATION;
+xrWaitSwapchainImage(secondarySwapchain, &waitInfo);
 
-Shader Output
+// use secondaryColorImageViews[idx1] for framebuffer creation
 
-If the secondary color attachment should receive unique output, the fragment shader must declare and write to a second output variable.
+XrSwapchainImageReleaseInfo rel{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+xrReleaseSwapchainImage(secondarySwapchain, &rel);
+```
 
-layout(location = 0) out vec4 outPrimaryColor;
-layout(location = 1) out vec4 outSecondaryColor;
+---
 
-void main() {
-    outPrimaryColor = vec4(1.0, 0.0, 0.0, 1.0); // Red
-    outSecondaryColor = vec4(0.0, 1.0, 0.0, 1.0); // Green
-}
+## Notes
 
-
-⸻
+- The OpenXR compositor will only present the primary color swapchain.
+- Formats, sample counts, and dimensions must match across attachments in the subpass.
+- For multiview, ensure `VK_IMAGE_VIEW_TYPE_2D_ARRAY` and matching `arrayLayers` for all attachments.
