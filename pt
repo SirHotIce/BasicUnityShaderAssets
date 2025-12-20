@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---- CONFIG ----
+ADB="${ADB:-adb}"
+
+# Your Unity app identifiers (fill these)
+APP_PKG="${APP_PKG:-com.yourcompany.passthroughviewer}"
+APP_ACTIVITY="${APP_ACTIVITY:-com.unity3d.player.UnityPlayerActivity}"
+
+# Virtual webcam device
+V4L2_DEV="${V4L2_DEV:-/dev/video2}"
+V4L2_NR="${V4L2_NR:-2}"
+
+# scrcpy tuning
+MAX_SIZE="${MAX_SIZE:-1280}"     # 1280 is a good latency/bandwidth tradeoff
+BITRATE="${BITRATE:-8M}"         # raise if your Wi-Fi/USB is solid
+MAX_FPS="${MAX_FPS:-60}"         # 60 if the headset renders it
+# ----------------
+
+echo "[1/5] ADB connect / wait"
+$ADB start-server >/dev/null
+$ADB wait-for-device
+
+echo "[2/5] Keep device awake + unlock (best effort)"
+$ADB shell svc power stayon true >/dev/null 2>&1 || true
+$ADB shell input keyevent 82 >/dev/null 2>&1 || true
+
+echo "[3/5] Launch Unity passthrough app"
+# If this fails, your activity name is wrong—see helper commands below.
+$ADB shell am start -n "${APP_PKG}/${APP_ACTIVITY}" >/dev/null
+
+echo "[4/5] Create v4l2loopback device ${V4L2_DEV}"
+# 'exclusive_caps=1' makes it behave like a real webcam for most apps
+sudo modprobe -r v4l2loopback >/dev/null 2>&1 || true
+sudo modprobe v4l2loopback video_nr=${V4L2_NR} exclusive_caps=1 card_label="PicoPassthrough" max_buffers=2
+
+echo "[5/5] Start scrcpy -> v4l2 (lowest overhead path if supported)"
+# Many scrcpy builds support v4l2 sink on Linux. If yours doesn't, see fallback below.
+scrcpy \
+  --no-audio \
+  --max-size "${MAX_SIZE}" \
+  --bit-rate "${BITRATE}" \
+  --max-fps "${MAX_FPS}" \
+  --stay-awake \
+  --no-display \
+  --v4l2-sink="${V4L2_DEV}"
+
+echo "Done. Your virtual webcam should be at ${V4L2_DEV}"
