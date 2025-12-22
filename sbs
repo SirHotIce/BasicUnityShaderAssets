@@ -1,30 +1,32 @@
-Shader "Unlit/OpenXR_SBS_Unlit"
+Shader "Unlit/SBS_VR_Video_URP"
 {
     Properties
     {
-        _MainTex ("Video Texture (RenderTexture)", 2D) = "black" {}
-        _FlipY ("Flip Y (some video sources)", Float) = 0
+        _MainTex ("Video Texture", 2D) = "black" {}
+        [Toggle]_EnableUndistort ("Enable Undistort", Float) = 0
+        _Radius ("Undistort Radius", Range(0.5, 2.0)) = 1.0
     }
 
     SubShader
     {
-        Tags { "RenderPipeline"="UniversalPipeline" "Queue"="Transparent" "RenderType"="Transparent" }
-        ZWrite Off
-        Cull Off
-        Blend SrcAlpha OneMinusSrcAlpha
-
+        Tags { "RenderPipeline"="UniversalRenderPipeline" "Queue"="Transparent" "RenderType"="Transparent" }
         Pass
         {
-            Name "ForwardUnlit"
+            Name "Unlit"
             Tags { "LightMode"="UniversalForward" }
+
+            Cull Off
+            ZWrite Off
+            Blend SrcAlpha OneMinusSrcAlpha
 
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
 
-            // Important for VR single-pass instanced / multiview
+            // XR variants
             #pragma multi_compile_instancing
             #pragma multi_compile _ UNITY_SINGLE_PASS_STEREO
+            #pragma multi_compile _ STEREO_INSTANCING_ON STEREO_MULTIVIEW_ON
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
@@ -33,55 +35,90 @@ Shader "Unlit/OpenXR_SBS_Unlit"
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _MainTex_ST;
-                float _FlipY;
+                float _EnableUndistort;
+                float _Radius;
             CBUFFER_END
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
-                float2 uv         : TEXCOORD0;
+                float2 uv : TEXCOORD0;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
             {
                 float4 positionHCS : SV_POSITION;
-                float2 uv          : TEXCOORD0;
+                float2 uv : TEXCOORD0;
                 UNITY_VERTEX_OUTPUT_STEREO
             };
 
-            Varyings vert (Attributes IN)
+            Varyings vert (Attributes v)
             {
-                Varyings OUT;
-                UNITY_SETUP_INSTANCE_ID(IN);
-                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT);
+                Varyings o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
 
-                OUT.positionHCS = TransformObjectToHClip(IN.positionOS.xyz);
-                OUT.uv = TRANSFORM_TEX(IN.uv, _MainTex);
-                return OUT;
+                o.positionHCS = TransformObjectToHClip(v.positionOS.xyz);
+                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+                return o;
             }
 
-            half4 frag (Varyings IN) : SV_Target
+            // Simple radial mapping. When enabled, we apply an inverse-barrel style warp.
+            float2 ApplyUndistort(float2 uv01, float radius)
             {
-                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
+                // uv01 is per-eye, in 0..1
+                float2 p = uv01 * 2.0 - 1.0;              // -1..1
+                float r2 = dot(p, p);
 
-                float2 uv = IN.uv;
+                // Convert "radius" to a gentle strength.
+                // radius = 1 -> no change
+                // radius < 1 -> stronger correction
+                // radius > 1 -> weaker correction
+                float k = (1.0 - radius) * 0.35;
 
-                // Optional vertical flip if your source comes upside down
-                if (_FlipY > 0.5)
-                    uv.y = 1.0 - uv.y;
+                // Inverse-barrel-ish: scale outward slightly based on r^2
+                float scale = 1.0 + k * r2;
 
-                // Side-by-side split:
-                // left eye -> left half, right eye -> right half
-                // unity_StereoEyeIndex: 0 = left, 1 = right
+                p *= scale;
+
+                float2 outUV = (p + 1.0) * 0.5;
+                return outUV;
+            }
+
+            half4 frag (Varyings i) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
+
+                // 0 = left, 1 = right
                 float eye = (float)unity_StereoEyeIndex;
 
-                uv.x = uv.x * 0.5 + eye * 0.5;
+                // Split SBS: left half for left eye, right half for right eye
+                // Start with per-eye UV 0..1
+                float2 uvEye = i.uv;
+                uvEye.x = uvEye.x * 0.5;        // shrink to half width
 
-                half4 col = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uv);
+                // Optional undistort is best done in per-eye space (0..1)
+                if (_EnableUndistort > 0.5)
+                {
+                    float2 local = float2(uvEye.x * 2.0, uvEye.y);   // convert half -> full 0..1
+                    local = ApplyUndistort(local, _Radius);
+
+                    // convert back full -> half
+                    uvEye.x = local.x * 0.5;
+                    uvEye.y = local.y;
+                }
+
+                // Offset to correct half (L or R)
+                uvEye.x += eye * 0.5;
+
+                // Clamp to avoid sampling outside (this is a common cause of “black regions”)
+                uvEye = saturate(uvEye);
+
+                half4 col = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, uvEye);
                 return col;
             }
-            ENDHLSLPROGRAM
+            ENDHLSL
         }
     }
 }
